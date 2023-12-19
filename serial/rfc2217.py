@@ -48,6 +48,8 @@
 # future, so lets use an URL scheme.
 # for RFC2217 compliant servers we will use this:
 #    rfc2217://<host>:<port>[?option[&option...]]
+# or to connect to a Unix socket:
+#    rfc2217+unix://%2Fpath%2Fto%2Fsocket[?option[&option...]]
 #
 # options:
 # - "logging" set log level print diagnostic messages (e.g. "logging=debug")
@@ -413,8 +415,13 @@ class Serial(SerialBase):
         if self.is_open:
             raise SerialException("Port is already open.")
         try:
-            self._socket = socket.create_connection(self.from_url(self.portstr), timeout=5)  # XXX good value?
-            self._socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            host, port = self.from_url(self.portstr)
+            if host is not None:
+                self._socket = socket.create_connection(self.from_url(self.portstr), timeout=5)  # XXX good value?
+                self._socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            else:
+                self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                self._socket.connect(port)
         except Exception as msg:
             self._socket = None
             raise SerialException("Could not open port {}: {}".format(self.portstr, msg))
@@ -563,11 +570,13 @@ class Serial(SerialBase):
         an stored in instance
         """
         parts = urlparse.urlsplit(url)
-        if parts.scheme != "rfc2217":
+        if parts.scheme not in ("rfc2217", "rfc2217+unix"):
             raise SerialException(
                 'expected a string in the form '
-                '"rfc2217://<host>:<port>[?option[&option...]]": '
-                'not starting with rfc2217:// ({!r})'.format(parts.scheme))
+                '"rfc2217://<host>:<port>[?option[&option...]]" or '
+                '"rfc2217+unix://%2Fpath%2Fto%2Fsocket[?option[&option...]]": '
+                'does not start with rfc2217[+unix]:// '
+                '({!r})'.format(parts.scheme))
         try:
             # process options now, directly altering self
             for option, values in urlparse.parse_qs(parts.query, True).items():
@@ -584,13 +593,23 @@ class Serial(SerialBase):
                     self._network_timeout = float(values[0])
                 else:
                     raise ValueError('unknown option: {!r}'.format(option))
-            if not 0 <= parts.port < 65536:
-                raise ValueError("port not in range 0...65535")
+            if parts.scheme == 'rfc2217':
+                if not 0 <= parts.port < 65536:
+                    raise ValueError("port not in range 0...65535")
+            elif parts.scheme == 'rfc2217+unix':
+                path = urlparse.unquote(parts.netloc)
+                if not path.startswith('/'):
+                    raise ValueError("path to socket does not start with /")
         except ValueError as e:
             raise SerialException(
                 'expected a string in the form '
-                '"rfc2217://<host>:<port>[?option[&option...]]": {}'.format(e))
-        return (parts.hostname, parts.port)
+                '"rfc2217://<host>:<port>[?option[&option...]]" or '
+                '"rfc2217+unix://%2Fpath%2Fto%2Fsocket[?option[&option...]]"'
+                ': {}'.format(e))
+        if parts.scheme == 'rfc2217':
+            return (parts.hostname, parts.port)
+        elif parts.scheme == 'rfc2217+unix':
+            return (None, path)
 
     #  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
 

@@ -67,7 +67,7 @@ def serial_for_url(url, *args, **kwargs):
     else:
         # if it is an URL, try to import the handler module from the list of possible packages
         if '://' in url_lowercase:
-            protocol = url_lowercase.split('://', 1)[0]
+            protocol = url_lowercase.split('://', 1)[0].split('+', 1)[0]
             module_name = '.protocol_{}'.format(protocol)
             for package_name in protocol_handler_packages:
                 try:
